@@ -1,0 +1,446 @@
+% !TEX program = xelatex
+% ============================================================
+%  第1周实验报告（Shell / Git / LaTeX）
+%  编译：latexmk -pdf -xelatex 第1周实验报告.tex
+%  命令行编译：latexmk -xelatex 第1周实验报告.tex
+%  VSCode（LaTeX Workshop）：直接编译即可，本行 magic comment 指定 xelatex
+% ============================================================
+\documentclass[a4paper,11pt]{article}
+
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\graphicspath{{../pictures/}{../pictures/w1ex/}}
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=flexible,
+  commentstyle=\color{gray},
+  keywordstyle=\color{blue},
+  stringstyle=\color{teal},
+  showstringspaces=false,
+  tabsize=4
+}
+
+\title{第1周实验报告（Shell / Git / LaTeX）}
+\author{唐朝伟—学号：25020007111}
+\date{2026年8月30日}
+
+\begin{document}
+\maketitle
+
+\section{第1题 含空格文件名的批量整理}
+
+\begin{lstlisting}[language=bash]
+mkdir q01 && cd q01
+mkdir -p input/docs input/tmp
+printf 'alpha\nbeta\n' > "input/docs/notes one.txt"
+printf 'hidden\n' > input/docs/.secret.txt
+touch input/tmp/empty.txt
+printf '2026-08-24 09:00:01 start\n2026-08-24 09:00:02 done\n' > input/run.log
+
+pwd
+ls -laR input
+
+mkdir -p "work/25020007111"
+(cd input && find . -type f -name '*.txt' -exec cp --parents {} "../work/25020007111/" \;)
+
+find "work/25020007111" -type d -exec chmod 750 {} +
+find "work/25020007111" -type f -exec chmod 640 {} +
+(cd "work/25020007111" && find . -type f -printf '%P %s\n') > inventory.txt
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 134323}.png}
+  \caption{第1题：创建目录与文件，查看内容并统计字节数}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 135642}.png}
+  \caption{第1题：长格式列出含隐藏文件，复制并改权限，生成 inventory.txt}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 文件名含空格：必须用引号包住整条路径；\verb|find| 配合 \verb|while read| 时加 \verb|IFS=| 防去首尾空格、\verb|-r| 防反斜杠转义。
+  \item 隐藏文件以点开头：shell 通配符 \verb|*| 不匹配，但 \verb|find -name '*.txt'| 会匹配到（所以复制时用 find 而非 \verb|cp *.txt|）。
+  \item \verb|mkdir -p| 递归建目录（父目录不存在则创建，否则忽略）；\verb|touch| 建空文件，已存在只更新时间戳。
+  \item \verb|cp --parents| 保留相对目录结构；权限 \verb|chmod 750| 目录、\verb|chmod 640| 文件；\verb|find -printf '%P %s'| 输出相对路径+字节数。
+\end{enumerate}
+
+\section{第2题 随机访问日志统计}
+
+\begin{lstlisting}[language=bash]
+mkdir q02 && cd q02
+cat > access.csv <<'EOF'
+timestamp,user,path,status,latency_ms
+09:00:01,alice,/api/users,200,120
+09:00:02,bob,/api/orders,500,310
+09:00:03,alice,/api/users,503,180
+09:00:04,carol,/login,500,90
+09:00:05,bob,/api/orders,502,260
+09:00:06,dave,/health,200,20
+09:00:07,alice,/api/orders,500,420
+09:00:08,carol,/api/users,500,150
+EOF
+
+cat > analyze.sh <<'EOF'
+#!/bin/bash
+file="${1:-}"
+if [[ -z "$file" ]]; then
+  echo "用法: $0 <csv文件>" >&2
+  exit 2
+fi
+if [[ ! -f "$file" ]]; then
+  echo "错误: 文件不存在: $file" >&2
+  exit 1
+fi
+echo "HTTP 5xx 最多的前 2 个 path："
+awk -F, 'NR>1 && $4 ~ /^5/ {c[$3]++} END {for (p in c) print c[p], p}' "$file" \
+  | sort -k1,1nr -k2,2 \
+  | head -n 2 \
+  | awk '{print $2}'
+echo -n "平均 latency_ms："
+awk -F, 'NR>1 {sum+=$5; n++} END {printf "%.2f\n", sum/n}' "$file"
+EOF
+
+bash analyze.sh access.csv
+bash analyze.sh no_such.csv; echo "退出码: $?"
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 141156}.png}
+  \caption{第2题：运行 analyze.sh 得到前 2 个 5xx path 与平均延迟 193.75}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 141302}.png}
+  \caption{第2题：对不存在的文件运行，错误写 stderr 且退出码为 1}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 用 \verb|cat > f <<'EOF'| 写多行文件且是 LF 换行；别用 Windows 记事本（CRLF，\verb|awk| 取字段会多出 \verb|\r|）。
+  \item 统计 5xx path：\verb|awk -F, 'NR>1 && $4 ~ /^5/ {c[$3]++}'|，\verb|NR>1| 跳过表头，\verb|c[$3]++| 以 path 计数。
+  \item \verb|sort -k1,1nr -k2,2| 数值逆序、同数按字典序；\verb|head -n 2| 取前二。
+  \item 平均延迟：\verb|awk 'NR>1 {sum+=$5; n++} END {printf "%.2f", sum/n}'|，用 \verb|printf| 保留两位小数。
+\end{enumerate}
+
+\section{第3题 制造、解决并解释一次合并冲突}
+
+\begin{lstlisting}[language=bash]
+mkdir q03 && cd q03
+git init -b main
+git config user.name "sio"
+git config user.email "tangcwyx@163.com"
+
+echo "mode=normal" > config.txt
+git add config.txt
+git commit -m "initial commit"
+
+git checkout -b feature-a
+echo "mode=safe" > config.txt
+git add config.txt
+git commit -m "set mode=safe"
+
+git checkout main
+git checkout -b feature-b
+echo "mode=fast" > config.txt
+git add config.txt
+git commit -m "set mode=fast"
+
+git checkout main
+git merge feature-a
+git merge feature-b        # 冲突
+
+printf 'mode=safe\nnote=reviewed\n' > config.txt
+git add config.txt
+git commit -m "merge feature-b, keep mode=safe"
+
+git status
+git log --all --graph --decorate --oneline
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 141930}.png}
+  \caption{第3题：初始化仓库并创建 feature-a 分支，提交 mode=safe}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 143303}.png}
+  \caption{第3题：合并 feature-a 后合并 feature-b 产生冲突，进入 MERGING 状态}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 143749}.png}
+  \caption{第3题：config.txt 中的冲突标记 <<<<<<< / ======= / >>>>>>>}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 143946}.png}
+  \caption{第3题：vim 中解决冲突，保留 mode=safe 并添加 note=reviewed，:wq 保存}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 144705}.png}
+  \caption{第3题：git add + commit 完成合并，工作区干净，分支图汇入 main}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 三区模型：工作区（文件）$\to$ 暂存区（\verb|git add|）$\to$ 仓库（\verb|git commit|）。
+  \item \verb|git init -b main| 初始化并指定主分支名（\verb|-b| = branch，不指定则用默认分支名）。
+  \item 冲突成因：两个分支改了同一文件的同一行，git 无法自动判断保留谁；标记为 \verb|<<<<<<<| / \verb|=======| / \verb|>>>>>>>|。
+  \item 解决后 \verb|git add| 加 \verb|git commit| 完成合并；\verb|git log --all --graph --decorate --oneline| 查看分支图。
+\end{enumerate}
+
+\section{第4题 修复并构建一页技术说明}
+
+\begin{lstlisting}[language=bash]
+mkdir q04 && cd q04
+export PATH="/c/texlive/2026/bin/windows:$PATH"
+latexmk -pdf -halt-on-error report.tex
+# 或 latexmk -pdf -xelatex -halt-on-error report.tex
+\end{lstlisting}
+
+report.tex 关键片段：
+
+\begin{lstlisting}[language=tex]
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage[UTF8]{ctex}
+\begin{document}
+\title{Tool Report}\author{唐朝伟—学号：25020007111}\maketitle
+\section{Result}
+公式 \eqref{eq:quadratic} 与表 \ref{tab:sample}。
+\begin{equation}\label{eq:quadratic}
+  x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+\end{equation}
+\begin{table}[h]\centering
+  \caption{示例取值}\label{tab:sample}
+  \begin{tabular}{|c|c|}
+    \hline
+    1 & 2 \\ \hline
+    3 & 4 \\ \hline
+  \end{tabular}
+\end{table}
+\end{document}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 145945}.png}
+  \caption{第4题：report.tex 源码（VSCode 编辑器）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-08-31 150543}.png}
+  \caption{第4题：编译生成的 report.pdf，公式 (1) 与表 1 交叉引用正确，无 \texttt{??}}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 文档骨架：\verb|\documentclass| 声明类型，\verb|\begin{document}| 开始正文，之前是导言区。
+  \item 公式 \verb|equation| 自动编号，\verb|\label| 打标签，正文用 \verb|\eqref| 引用。
+  \item 表格：\verb|table|（浮动体，\verb|\caption| 标题、\verb|\label| 标签）+ \verb|tabular| 画表（\verb|&| 分列、\verb|\\| 换行、\verb|\hline| 横线）。
+  \item 交叉引用依赖 \verb|.aux|，只编译一遍会显示 \verb|??|；用 \verb|latexmk -pdf -halt-on-error| 自动多遍编译解决。
+\end{enumerate}
+
+\section{课后练习（missing-semester Shell 2$\sim$15）}
+
+\subsection{练习 2：ls -l 与权限位}
+\begin{lstlisting}[language=bash]
+ls -l /    # 前10位：类型(1) + 属主(2-4) + 属组(5-7) + 其他(8-10)
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|-l|（long format）长格式：每行显示权限、硬链接数、属主、属组、大小、修改时间、名字。
+  \item 前 10 位：第 1 位文件类型（\verb|-| 普通、\verb|d| 目录、\verb|l| 链接等），2~4 位属主、5~7 位属组、8~10 位其他用户，权限为 \verb|r| 读 / \verb|w| 写 / \verb|x| 执行。
+\end{enumerate}
+
+\subsection{练习 3：glob 通配符}
+\begin{lstlisting}[language=bash]
+ls *.txt  file?.txt  {a,b,c}.txt  [ab].txt
+\end{lstlisting}
+
+\begin{enumerate}
+  \item glob 是 shell 用来匹配文件名的通配模式，执行前由 shell 自身展开成一组已存在文件名；\verb|find -name "*.zip"| 里的要加引号交给 find 匹配，而非让 shell 先展开。
+  \item \verb|*| 匹配任意个字符（不含路径分隔符）、\verb|?| 恰好一个、\verb|[ab]| 字符类匹配任一、\verb|{a,b,c}| 花括号展开字符串组合（不要求文件存在）。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 211005}.png}
+  \caption{课后练习：ls -l 权限位与 glob 通配符（\texttt{*}/\texttt{?}/\{a,b,c\}/[ab]）}
+\end{figure}
+
+\subsection{练习 4：三种引号}
+\begin{lstlisting}[language=bash]
+printf '$!'$'\n'
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|'单引号'| 完全字面量（\verb|$|、\verb|!|、\verb|\| 均不解析）；\verb|"双引号"| 解析 \verb|$|、命令替换、部分 \verb|\|，\verb|!| 在交互式 bash 仍会历史展开。
+  \item \verb|$'...'|（ANSI-C 引号）C 风格解析反斜杠转义：\verb|\n| 换行、\verb|\t| 制表符等。
+\end{enumerate}
+
+\subsection{练习 5：标准流重定向}
+\begin{lstlisting}[language=bash]
+ls /nonexistent /tmp > out.txt 2> err.txt
+ls /nonexistent /tmp > all.txt 2>&1
+ls /nonexistent /tmp &> all.txt
+\end{lstlisting}
+
+\begin{enumerate}
+  \item 三条标准流：stdin(0)、stdout(1)、stderr(2)；\verb|>| 等价 \verb|1>| 只重定向 stdout，\verb|2>| 重定向 stderr，\verb|<| 指 stdin。
+  \item \verb|2>&1| 把 stderr 重定向到 stdout 当前指向处；\verb|&>| 是 bash 简写，等价 \verb|2>&1|。
+  \item 顺序重要：\verb|> all.txt 2>&1| 正确；\verb|2>&1 > all.txt| 会把 stderr 送到旧 stdout（屏幕）。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 211629}.png}
+  \caption{课后练习：三种引号与标准流重定向（\texttt{\$\$'\char92n'} 与 \texttt{2>1}/\texttt{2\&1}）}
+\end{figure}
+
+\subsection{练习 6：退出状态与 \&\& / ||}
+\begin{lstlisting}[language=bash]
+[ -d /tmp/mydir ] || mkdir /tmp/mydir
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|$?| 保存上一条命令退出状态码（0~255，0 成功、1 一般错误、2 命令用法错误、255 越界）。
+  \item \verb|&&| 前一条成功才执行后一条；\verb+||+ 前一条失败才执行后一条；\verb|[ -d 路径 ]| 等价 \verb|test -d 路径|。
+\end{enumerate}
+
+\subsection{练习 7：为什么 cd 是内建命令}
+因为子进程无法改变父进程的状态。若 \verb|cd| 是独立程序，它只会在自己的子进程里切换工作目录，子进程退出后父进程（shell）的工作目录不变。而 \verb|cd| 需要修改 shell 自身的当前工作目录，所以必须由内建命令在当前进程内完成。同理 \verb|export|、\verb|alias| 也是内建命令。
+
+\subsection{练习 8：检查文件是否存在的脚本}
+\begin{lstlisting}[language=bash]
+if [ -f "$1" ]; then echo "$1 存在"; else echo "$1 不存在"; fi
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|[ -f "$1" ]| 等价 \verb|test -f "$1"|；\verb|-f| 判断存在且是普通文件（\verb|-e| 只判断存在）。
+  \item \verb|$1| 取第一个位置参数；带引号的 \verb|"$1"| 保留文件名的空格。
+\end{enumerate}
+
+\subsection{练习 9：chmod +x 与执行权限}
+\begin{lstlisting}[language=bash]
+./check.sh somefile        # Permission denied
+chmod +x check.sh
+./check.sh somefile
+\end{lstlisting}
+
+\begin{enumerate}
+  \item 直接 \verb|./脚本| 执行需要脚本有可执行位 \verb|x|；\verb|chmod +x| 加上它。
+  \item 绕过方式：\verb|bash check.sh somefile|（把脚本当参数交给 bash 解释，不依赖 \verb|x| 位）。
+  \item 在 Git Bash 或 WSL 的 \verb|/mnt| 目录下 \verb|chmod| 无效（NTFS 无真 Unix 权限），用 \verb|bash| 运行时只用到 \verb|r| 权限。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 215004}.png}
+  \caption{课后练习：文件存在性脚本与 \texttt{chmod -x}/\texttt{+x} 执行权限变化}
+\end{figure}
+
+\subsection{练习 10：set -x 跟踪}
+\begin{lstlisting}[language=bash]
+set -x   # 每条命令执行前打印（行首 +）；set +x 关闭
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|set -x|（xtrace）开启命令跟踪：每条命令执行前先打印到 stderr，行首加 \verb|+|，便于调试；\verb|set +x| 关闭。
+  \item \verb|set| 选项：\verb|-u| 变量未定义报错、\verb|-e| 命令失败即退出、\verb|-o pipefail| 管道任一段失败即失败。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 215935}.png}
+  \caption{课后练习：\texttt{set -x} 命令跟踪输出}
+\end{figure}
+
+\subsection{练习 11：带日期的备份}
+\begin{lstlisting}[language=bash]
+cp notes.txt "notes_$(date +%Y-%m-%d).txt"
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|$(date +%Y-%m-%d)| 是命令替换：执行 \verb|date +%Y-%m-%d| 并用其输出（如 \verb|2026-09-01|）替换到命令行。
+  \item \verb|+| 是 \verb|date| 命令的格式字符串前缀，\verb|-| 是普通分隔符会被输出；\verb|%| 后加 \verb|-| 去掉前导零，\verb|_| 用空格代替零，\verb|^| 转大写。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 220144}.png}
+  \caption{课后练习：命令替换 \texttt{\$(date +\%Y-\%m-\%d)} 生成日期备份名}
+\end{figure}
+
+\subsection{练习 12：flaky test 参数化}
+\begin{lstlisting}[language=bash]
+while ! "$@"; do :; done
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|"$@"| 展开为所有位置参数（\verb|$1 $2 ...|），每个原样保留（含空格），因此能接收整条测试命令；用 \verb|"$@"| 而非 \verb|$@|，避免参数被二次分词。
+  \item \verb|!| 对命令退出码取反：测试失败则继续循环重试，成功则退出；\verb|:| 是空操作占位循环体。
+  \item \verb|$#| 参数个数、\verb|$*|（不加引号）把所有参数拼成一个字符串。
+\end{enumerate}
+
+\subsection{练习 13：home 目录最常见的 5 种扩展名}
+\begin{lstlisting}[language=bash]
+find ~ -type f | grep -oE '\.[^./]+$' | sort | uniq -c | sort -nr | head -n 5
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|find ~ -type f| 找 home 下所有普通文件；\verb|~| 是当前用户家目录，接用户名可指定用户。
+  \item \verb|grep -oE '\.[^./]+$'| 只输出行尾扩展名：\verb|\.| 匹配字面点，\verb|[^./]| 否定字符类（排除点和斜杠），\verb|+| 一次以上，\verb|$| 行尾锚点。
+  \item \verb|sort| 后 \verb|uniq -c| 计数（uniq 只统计相邻重复），\verb|sort -nr| 按次数数值逆序，\verb|head -n 5| 取前 5。
+\end{enumerate}
+
+\subsection{练习 14：xargs 统计 .sh 行数}
+\begin{lstlisting}[language=bash]
+find . -type f -name '*.sh' -print0 | xargs -0 wc -l
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|find -print0| 用 NUL 字符（\verb|\0|，占 1 字节）分隔文件名，而不是默认换行，文件名里的空格、换行不会被切碎。
+  \item \verb|xargs -0| 按 NUL 分隔读取输入，与 \verb|-print0| 配套，正确处理含空格文件名；\verb|xargs| 把收到的文件名拼到 \verb|wc -l| 后批量执行（会自动按命令行长度上限分批）。
+\end{enumerate}
+
+\subsection{练习 15：curl 统计讲数}
+\begin{lstlisting}[language=bash]
+curl -s https://missing-semester-cn.github.io/2026/ \
+  | grep -oE 'href="/2026/[a-z-]+/"' | wc -l
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|curl -s| 静默模式，关闭进度输出；课程页每讲链接的共性是 \verb|href="/2026/<slug>/"|。
+  \item \verb|grep -oE| 只输出匹配部分，\verb|wc -l| 统计行数即讲数；更简单可用 \verb|grep -c 'href="/2026/'| 直接计数匹配行。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-01 220333}.png}
+  \caption{课后练习：最常见扩展名、xargs 统计行数、curl 统计讲数}
+\end{figure}
+
+\end{document}
