@@ -1,0 +1,102 @@
+% !TEX program = xelatex
+% ============================================================
+%  系统开发工具基础 · 实验报告模板
+%  命令行编译：latexmk -xelatex 报告文件名.tex
+%  （xelatex 对中文支持更稳；纯英文可退回 pdflatex）
+% ============================================================
+\documentclass[a4paper,11pt]{article}
+
+% ---------- 中文 ----------
+\usepackage[UTF8]{ctex}
+
+% ---------- 数学 ----------
+\usepackage{amsmath}
+
+% ---------- 表格 ----------
+\usepackage{booktabs}          % 三线表
+\usepackage{array}             % 列宽控制
+
+% ---------- 页面 ----------
+\usepackage[a4paper,margin=2.2cm]{geometry}
+
+% ---------- 图片 ----------
+\usepackage{graphicx}          % 插入图片
+\usepackage{float}             % [H] 让图片固定在当前位置，不乱跑
+\graphicspath{{../pictures/}}  % 图片搜索路径，可多个目录并列
+
+% ---------- 代码 ----------
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{
+  basicstyle=\ttfamily\small,   % 等宽小字号
+  breaklines=true,              % 自动换行
+  frame=single,                 % 边框
+  columns=flexible,             % 紧凑对齐
+  commentstyle=\color{gray},    % 注释灰色
+  keywordstyle=\color{blue},    % 关键字蓝色
+  stringstyle=\color{teal},     % 字符串青色
+  showstringspaces=false,
+  tabsize=4
+}
+
+% ---------- 标题信息（按需改） ----------
+\title{实验报告}
+\author{姓名—学号}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+%  正文从这里开始。常用片段：
+%
+%  1) 章节：\section{...}  \subsection{...}
+%
+%  2) 命令/代码：
+%     \begin{lstlisting}[language=bash]
+%     mkdir q01 && cd q01
+%     \end{lstlisting}
+%
+%  3) 公式（自动编号）+ 交叉引用：
+%     \begin{equation}
+%       \label{eq:quadratic}
+%       x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}
+%     \end{equation}
+%     正文用 \eqref{eq:quadratic} 引用（交叉引用需编译两遍）。
+%
+%  4) 三线表：
+%     \begin{table}[h]\centering
+%       \caption{标题}\label{tab:xxx}
+%       \begin{tabular}{cc}
+%         \toprule
+%         列1 & 列2 \\
+%         \midrule
+%         A & B \\
+%         \bottomrule
+%       \end{tabular}
+%     \end{table}
+%
+%  5) 插入图片（[H] 固定位置，width 控制大小，可含中文/空格文件名）：
+%     \begin{figure}[H]
+%       \centering
+%       \includegraphics[width=0.95\textwidth]{{图片 名}.png}
+%       \caption{图题}
+%     \end{figure}
+%
+%  6) 解题感悟（自动编号 1. 2. 3.，命令用 \verb|...| 原样显示）：
+%     \subsection*{解题感悟}
+%     \begin{enumerate}
+%       \item 文件名含空格必须用引号包住；\verb|find| 用 \verb|IFS=| 防去空格。
+%       \item 交叉引用依赖 \verb|.aux|，只编译一遍会显示 \verb|??|。
+%     \end{enumerate}
+%
+%  7) 提交记录（GitHub 链接 + commit 截图，放文末）：
+%     \section{提交记录}
+%     仓库链接：\texttt{https://github.com/账号/仓库}
+%     \begin{figure}[H]\centering
+%       \includegraphics[width=0.95\textwidth]{commit截图.png}
+%       \caption{GitHub commit 记录}
+%     \end{figure}
+% ============================================================
+
+\end{document}
