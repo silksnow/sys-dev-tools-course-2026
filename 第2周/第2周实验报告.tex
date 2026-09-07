@@ -1,0 +1,607 @@
+% !TEX program = xelatex
+% ============================================================
+%  第2周实验报告（命令行环境 / 开发环境与工具 / Debugging / Profiling）
+%  命令行编译：latexmk -xelatex 第2周实验报告.tex
+% ============================================================
+\documentclass[a4paper,11pt]{article}
+
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\graphicspath{{../pictures/}{../pictures/w2qs/}{../pictures/w2ex/}{../pictures/commit_pic/}}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=flexible,
+  commentstyle=\color{gray},
+  keywordstyle=\color{blue},
+  stringstyle=\color{teal},
+  showstringspaces=false,
+  tabsize=4
+}
+
+\title{第2周实验报告（命令行环境 / 开发环境与工具 / Debugging / Profiling）}
+\author{唐朝伟—学号：25020007111}
+\date{2026年8月31日}
+
+\begin{document}
+\maketitle
+
+\section{第5题 控制一个可清理的后台任务}
+
+\begin{lstlisting}[language=bash]
+mkdir q05 && cd q05
+cat > worker.sh <<'EOF'
+#!/usr/bin/env bash
+trap 'echo CLEAN_EXIT >> cleanup.log; exit 0' TERM INT
+n=0
+while true; do
+  echo "$n"
+  n=$((n+1))
+  sleep 1
+done
+EOF
+chmod +x worker.sh
+
+# 前台启动，stdout / stderr 分别写入两个文件
+./worker.sh > stdout.log 2> stderr.log
+
+# 按 Ctrl-Z 挂起（SIGTSTP），再 bg 后台继续
+bg
+jobs                 # 确认状态为 Running
+
+# jobs -p 只输出 PID，不手抄
+jobs -p
+kill -TERM $(jobs -p)   # 发 SIGTERM，触发 trap 里的清理
+
+sleep 1; jobs           # 任务已退出
+cat cleanup.log         # 出现 CLEAN_EXIT
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 193419}.png}
+  \caption{第5题：前台启动 $\to$ Ctrl-Z 挂起 $\to$ bg $\to$ jobs $\to$ jobs -p 取 PID $\to$ kill -TERM \$pid $\to$ wait \$pid 等待其结束 $\to$ cat cleanup.log 得 CLEAN\_EXIT}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 信号：\verb|SIGTERM|(15)、\verb|SIGINT|(2)、\verb|SIGTSTP|(20, Ctrl-Z) 可被 \verb|trap| 捕获；\verb|SIGKILL|(9) 不可捕获，所以题目禁 \verb|kill -9|。
+  \item \verb|trap '命令' TERM INT| 让进程收到信号时执行清理代码（写 \verb|cleanup.log| 再退出）。
+  \item 任务控制：\verb|Ctrl-Z| 挂起、\verb|bg| 后台继续、\verb|jobs| 查看、\verb|jobs -p| 取 PID（不手抄）、\verb|kill -TERM| 结束。
+  \item 重定向：\verb|>| 等价 \verb|1>| 重定向 stdout，\verb|2>| 重定向 stderr。
+\end{enumerate}
+
+\section{第6题 语义重构与本地开发反馈}
+
+\begin{lstlisting}[language=Python]
+# math_utils.py
+def total_price(price: float, count: int) -> float:
+    return price * count
+
+# app.py
+from math_utils import total_price
+print(total_price(12.5, 4))
+
+# test_math_utils.py
+from math_utils import total_price
+def test_total_price():
+    assert total_price(12.5, 4) == 50.0
+\end{lstlisting}
+
+用 VS Code 打开 \verb|q06|，Pylance 语言服务器随 Python 扩展启用。演示：
+\verb|F12| 跳转到定义、\verb|Shift+F12| 查找引用、\verb|F2| 重命名符号。
+
+\begin{lstlisting}[language=Python]
+# 重命名符号 total_price -> calculate_total（F2），定义与所有引用同步
+# math_utils.py:  def calculate_total(price: float, count: int) -> float:
+# app.py:         from math_utils import calculate_total
+#                 print(calculate_total(12.5, 4))
+# test_math_utils.py:  assert calculate_total(12.5, 4) == 50.0
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+# 临时在 app.py 加入未使用的 import os，用 ruff 发现并删除
+ruff check .            # 报 F401: os imported but unused
+ruff check --fix .      # 自动删除未使用 import
+
+ruff check .            # 无报错
+pytest                  # 1 passed
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 200342}.png}
+  \caption{第6题：在 math\_utils.py 定义处悬停参数 price，Pylance 显示 (parameter) price: float}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{7a81306c-3aa3-4308-b7a4-611197c0e89c}.png}
+  \caption{第6题：Ctrl+点击 total\_price 跳转到定义（非 F12），并悬停显示函数签名}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 201148}.png}
+  \caption{第6题：Shift+F12 查找引用，列出 total\_price 的全部引用位置}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 201303}.png}
+  \caption{第6题：F2 重命名符号，输入新名 calculate\_total}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 201537}.png}
+  \caption{第6题：重命名后所有引用同步为 calculate\_total（References 5）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 202150}.png}
+  \caption{第6题：临时加入 import os，ruff check 报 I001 与 F401 未使用}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 202518}.png}
+  \caption{第6题：ruff --fix 自动删除后 All checks passed，pytest 1 passed}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 语言服务器（LSP）把编辑器与语言智能解耦，Pylance 提供跳转、补全、诊断。
+  \item \verb|F2| 重命名是语义级的，只改"同一符号"的定义和引用，不会误伤同名不同义。
+  \item \verb|ruff| 是极快的 linter+formatter，未使用 import 规则编号 \verb|F401|；\verb|ruff check --fix| 自动修复。
+  \item \verb|pytest| 自动发现 \verb|test_*.py|，用 \verb|assert| 断言。
+\end{enumerate}
+
+\section{第7题 用调试器定位归并排序缺陷}
+
+\begin{lstlisting}[language=Python]
+# merge_sort.py（含缺陷）
+def merge(left, right):
+    result = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            result.append(left[i]); i += 1
+        else:
+            result.append(right[i]); j += 1  # 缺陷：right[i] 应为 right[j]
+    return result + left[i:] + right[j:]
+
+def merge_sort(a):
+    if len(a) <= 1: return a
+    m = len(a) // 2
+    return merge(merge_sort(a[:m]), merge_sort(a[m:]))
+
+print(merge_sort([3, 1, 4, 1, 5, 9, 2, 6]))   # 抛 IndexError 或结果错误
+\end{lstlisting}
+
+用 pdb 设断点观察 \verb|i|、\verb|j|、\verb|left[i]|、\verb|right[j]|：
+
+\begin{lstlisting}
+python -m pdb merge_sort.py
+(Pdb) b merge          # 在 merge 函数入口设断点
+(Pdb) c                # 运行到断点
+(Pdb) p i, j           # 观察下标
+(Pdb) p left[i], right[j]   # 观察比较的两个元素
+(Pdb) n                # 单步，进入 else 分支时发现 right[i] 越界/取错
+(Pdb) q                # 退出
+\end{lstlisting}
+
+最小修复（不得用 \verb|sorted| 替换归并排序）：
+
+\begin{lstlisting}[language=Python]
+def merge(left, right):
+    result = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            result.append(left[i]); i += 1
+        else:
+            result.append(right[j]); j += 1   # 修复：right[i] -> right[j]
+    return result + left[i:] + right[j:]
+
+# test_merge_sort.py
+from merge_sort import merge_sort
+def test_given_input():
+    assert merge_sort([3, 1, 4, 1, 5, 9, 2, 6]) == [1, 1, 2, 3, 4, 5, 6, 9]
+def test_with_duplicates():
+    assert merge_sort([5, 3, 3, 1, 2, 2]) == [1, 2, 2, 3, 3, 5]
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+python merge_sort.py   # [1, 1, 2, 3, 4, 5, 6, 9]
+pytest                 # 2 passed
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 202933}.png}
+  \caption{第7题：运行 merge\_sort，输出 [1,5,4,3,4,5,6,9] 结果错误}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 204258}.png}
+  \caption{第7题：pdb 设断点、单步，p 打印 i,j,left[i],right[j],right[i]}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 204235}.png}
+  \caption{第7题：单步进入 else 分支，right[i] 越界抛 IndexError}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 205024}.png}
+  \caption{第7题：VS Code 调试器观察变量与调用栈}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 205954}.png}
+  \caption{第7题：修复 right[i]$\to$right[j] 后，pytest 两个测试均通过}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 调试器让程序在运行中暂停：\verb|b| 断点、\verb|c| 继续、\verb|n|/s 单步、\verb|p| 打印变量。
+  \item 缺陷本质：\verb|else| 分支写 \verb|right[i]|，\verb|i| 是 left 下标，应为 \verb|right[j]|，导致越界 \verb|IndexError|。
+  \item 归并排序分治：二分递归排好再 \verb|merge| 合并；\verb|i| 走 left、\verb|j| 走 right。
+  \item 最小修复只改一处，不改算法结构，也不允许 \verb|sorted|。
+\end{enumerate}
+
+\section{第8题 先测量，再优化慢速词频程序}
+
+\begin{lstlisting}[language=Python]
+# generate_words.py
+import random
+random.seed(20260831)
+vocab = [f"w{i}" for i in range(1000)]
+with open("words.txt", "w", encoding="utf-8") as f:
+    f.write(" ".join(random.choice(vocab) for _ in range(30000)))
+
+# wordfreq.py（原版，O(n^2)）
+words = open("words.txt", encoding="utf-8").read().split()
+unique = []
+for word in words:
+    if word not in unique:
+        unique.append(word)
+print("count=", len(unique))
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+python generate_words.py              # 生成 3 万词
+time python wordfreq.py               # 跑 2 次，记录耗时
+python -m cProfile -s cumulative wordfreq.py   # 找瓶颈
+\end{lstlisting}
+
+优化（不改 count、不写死 1000，用 set 去重降到 O(n)）：
+
+\begin{lstlisting}[language=Python]
+words = open("words.txt", encoding="utf-8").read().split()
+unique = set(words)                   # set 成员判断 O(1)
+print("count=", len(unique))          # count=1000，与优化前一致
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+time python wordfreq.py   # 再跑 2 次，算中位数与加速比
+\end{lstlisting}
+
+\begin{table}[h]\centering
+  \caption{优化前后耗时与加速比}\label{tab:q08}
+  \begin{tabular}{lcc}
+    \toprule
+    阶段 & 两次耗时 & 中位数 \\
+    \midrule
+    优化前 & 0.095s、0.088s & 0.0915s \\
+    优化后 & 0.020s、0.021s & 0.0205s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+加速比 $\approx 0.0915 \div 0.0205 \approx 4.5$ 倍。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 213532}.png}
+  \caption{第8题：原版 O(n²) 词频，time 两次（约 0.09s），cProfile 定位到循环}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-04 214016}.png}
+  \caption{第8题：改用 set 去重，time 两次（约 0.02s），count 仍为 1000}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 先测量再优化：用 \verb|cProfile -s cumulative| 定位瓶颈，而不是凭感觉乱改。
+  \item 瓶颈是 \verb|word not in unique| 的列表成员判断 O(n)，整体 O(n²)；改用 set 后 O(1) 判断、整体 O(n)。
+  \item \verb|random.seed(20260831)| 固定随机种子，保证前后输入一致，对比才公平。
+  \item 实测优化前中位数约 0.0915s、优化后约 0.0205s，加速比约 4.5 倍；count 始终为 1000 未变。
+\end{enumerate}
+
+\section{课后练习（missing-semester：Debugging \& Profiling + 命令行环境）}
+
+\subsection{调试 1：journalctl 查看超级用户登录记录}
+
+\begin{lstlisting}[language=bash]
+journalctl --since yesterday | grep sudo   # Linux（macOS 用 log show）
+sudo ls                                   # 造几条无害记录
+journalctl -u sudo --since today
+\end{lstlisting}
+
+\verb|journalctl| 是 systemd 日志查看器；\verb|--since| 限定时间范围，\verb|-u sudo| 只看 sudo 服务日志。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 195925}.png}
+  \caption{课后练习·调试1：journalctl 查看超级用户登录与所执行的指令（sudo ls，COMMAND=/usr/bin/ls）}
+\end{figure}
+
+\subsection{调试 2：pdb 教程}
+
+跟做 \url{https://github.com/spiside/pdb-tutorial}（中文版 \url{https://github.com/MartinLwx/pdb-tutorial}）。
+
+调试器的价值：（1）检查运行中程序的状态；（2）程序投入使用前先测试；（3）追踪执行逻辑（比到处 \verb|print| 快）。进入调试：\verb|import pdb; pdb.set_trace()| 或 \verb|python -m pdb main.py|。
+
+5 个核心命令（括号内为可省略写法）：
+
+\begin{lstlisting}
+l(ist)    显示当前行附近 11 行源码（ll 显示整个函数）
+s(tep)    单步，会进入被调用的函数
+n(ext)    单步到下一行，不进入函数
+b(reak)   设断点：b 34 / b 函数名；cl 1 删除
+r(eturn)  运行到当前函数返回
+\end{lstlisting}
+
+两个技巧：短变量名会撞命令名（如 \verb|c| 是 \verb|continue|），取值用 \verb|!c|（\verb|!| 表示后接 Python 语句）；用 \verb|dir(die)| 看对象属性。
+
+post-mortem（事后调试）：崩溃后用 \verb|pdb.pm()| 回到异常抛出点；\verb|python -m pdb 脚本.py| 遇未捕获异常会自动进入。
+
+\subsection{调试 3：shellcheck 检查脚本}
+
+\begin{lstlisting}[language=bash]
+sudo apt install shellcheck
+\end{lstlisting}
+
+原脚本存在多处问题：
+
+\begin{lstlisting}[language=bash]
+#!/bin/sh
+for f in $(ls *.m3u)
+do
+  grep -qi hq.*mp3 $f \
+    && echo -e 'Playlist $f contains a HQ file in mp3 format'
+done
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \verb|$(ls *.m3u)| 应用 \verb|*.m3u| 直接遍历，勿用 \verb|ls|（文件名含空格会被拆开）。
+  \item \verb|$f| 应加双引号 \verb|"$f"|。
+  \item \verb|echo -e '... $f ...'| 单引号内 \verb|$f| 不展开，应改双引号 \verb|"$f"|。
+\end{enumerate}
+
+修复后：
+
+\begin{lstlisting}[language=bash]
+#!/bin/sh
+for f in *.m3u
+do
+  grep -qi 'hq.*mp3' "$f" \
+    && echo "Playlist $f contains a HQ file in mp3 format"
+done
+\end{lstlisting}
+
+\verb|shellcheck| 会报 \verb|SC2046|（勿用 \verb|ls|）、\verb|SC2086|（要加引号）；编辑器装 shellcheck 插件后实时提示。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 203019}.png}
+  \caption{课后练习·调试3：shellcheck 检查原脚本，报 SC2045/SC2035/SC2062/SC2086/SC2016}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 203928}.png}
+  \caption{课后练习·调试3：修复后 shellcheck 仅剩 SC2062 提示，cat 查看修复脚本}
+\end{figure}
+
+\subsection{调试 4（进阶）：可逆调试}
+
+阅读可逆调试白皮书，用 \verb|rr| 或 \verb|RevPDB| 做可反向单步的调试例子。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 225555}.png}
+  \caption{课后练习·调试4：rr record 记录 / rr replay 进入 gdb，设断点并单步}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 225651}.png}
+  \caption{课后练习·调试4：reverse-next 后 print x 由 2 回到 1，可逆调试演示成功}
+\end{figure}
+
+\subsection{性能分析 1：比较插入排序与快排}
+
+\begin{lstlisting}[language=bash]
+pip install line_profiler memory_profiler
+python -m cProfile -s cumulative sorts.py    # 总览
+kernprof -l -v sorts.py                      # 逐行
+python -m memory_profiler sorts.py           # 内存
+\end{lstlisting}
+
+插入排序瓶颈在内层 \verb|while| 比较后移（O(n²)）；快排瓶颈在递归与 \verb|partition|。插入排序原地（O(1) 额外空间），教材版快排每层新建列表内存更高，故插入排序内存更优；再看原地版快排对比。附加题用 \verb|perf| 看指令数与缓存命中。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 210534}.png}
+  \caption{课后练习·性能1：cProfile -s cumulative 总览 sorts.py}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 211136}.png}
+  \caption{课后练习·性能1：kernprof -l -v 逐行分析插入排序 / 快排 / 原地快排}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 211324}.png}
+  \caption{课后练习·性能1：memory\_profiler 对比内存（教材版快排每层新建列表，内存更高）}
+\end{figure}
+
+\subsection{性能分析 2：pycallgraph 画斐波那契调用图}
+
+\begin{lstlisting}[language=bash]
+pip install pycallgraph
+dot -V                      # 能运行 dot 即已装 graphviz
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python]
+#!/usr/bin/env python
+def fib0(): return 0
+def fib1(): return 1
+s = """def fib{}(): return fib{}() + fib{}()"""
+if __name__ == '__main__':
+    for n in range(2, 10):
+        exec(s.format(n, n-1, n-2))
+    # from functools import lru_cache
+    # for n in range(10):
+    #     exec("fib{} = lru_cache(1)(fib{})".format(n, n))
+    print(eval("fib9()"))
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+pycallgraph graphviz -- ./fib.py   # 生成 pycallgraph.png
+\end{lstlisting}
+
+原始递归版调用 fib9 时呈指数级重复：\verb|fib0| 被调用 \textbf{21 次}、\verb|fib1| 34 次，整个计算共约 \textbf{109 次} 函数调用（调用图密集）；放开 \verb|lru_cache| 后，\verb|fib0|\~{}  \verb|fib9| 每个函数因缓存只真正算一次，共 \textbf{10 次} 调用（调用图稀疏）——即记忆化。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 213027}.png}
+  \caption{课后练习·性能2：pycallgraph 未装时提示先安装，fib.py 源码与 dot 已装}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-05 213700}.png}
+  \caption{课后练习·性能2：pycallgraph graphviz -o 生成调用图，fib9 输出 34}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[height=0.85\textheight]{pycallgraph.png}
+  \caption{课后练习·性能2：未加 lru\_cache，fib0 被重复调用极多次（调用图密集）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[height=0.85\textheight]{pycallgraph2.png}
+  \caption{课后练习·性能2：放开 lru\_cache 后，每个 fibN 只算一次，调用图稀疏}
+\end{figure}
+
+\subsection{性能分析 3：lsof 查端口占用}
+
+\begin{lstlisting}[language=bash]
+python -m http.server 4444 &
+lsof | grep LISTEN      # 或 lsof -i :4444
+kill <PID>
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{屏幕截图 2026-09-07 141927}.png}
+  \caption{课后练习·性能3：python -m http.server 4444 起服务，lsof 查 PID，kill 后端口释放}
+\end{figure}
+
+\subsection{性能分析 4：stress + htop + taskset 限制 CPU}
+
+\begin{lstlisting}[language=bash]
+sudo apt install stress htop
+stress -c 3                      # 3 个 worker，htop 看约 3 核满载
+htop
+taskset --cpu-list 0,2 stress -c 3   # 绑到核 0、2，再看 htop
+\end{lstlisting}
+
+\verb|stress -c 3| 开 3 个 worker 线程各跑 CPU 死循环，不加限制时内核把它们调度到不同核，能占满 3 个核；\verb|taskset --cpu-list 0,2| 设置的是进程的 CPU 亲和性，把整个进程（连同 3 个线程）限制在核 0、2 上，于是 3 个线程只能挤在这 2 个核里，最多看到 2 核满载、第 3 个线程排队等——所以不是 3 个核满载。
+
+附加题：用 \verb|cgroups| 限制 \verb|stress -m| 内存。
+
+\begin{lstlisting}[language=bash]
+sudo apt install -y cgroup-tools
+sudo mkdir -p /sys/fs/cgroup/limit_mem
+echo 128M | sudo tee /sys/fs/cgroup/limit_mem/memory.max   # 上限 128M
+stress -m 4 --vm-bytes 64M &        # 4 个 worker 各 64M，共想占 256M
+echo $! | sudo tee /sys/fs/cgroup/limit_mem/cgroup.procs    # 把进程丢进 cgroup
+# 结果：被限制在 128M 内，内存不再暴涨
+\end{lstlisting}
+
+\verb|cgroups|（control groups）是内核按进程组限 CPU/内存/IO 的机制，v2 里写 \verb|memory.max| 即设内存上限，超过会回收甚至 OOM。
+
+\subsection{性能分析 5（进阶）：Wireshark 抓 curl 报文}
+
+\verb|curl ipinfo.io| 发起请求，Wireshark 抓包，过滤器填 \verb|http| 只看 HTTP 报文。
+
+\subsection{任务控制 1：pgrep / pkill}
+
+\begin{lstlisting}[language=bash]
+sleep 10000
+# Ctrl-Z 挂起
+bg
+pgrep -af sleep              # -a 显示完整命令行，-f 匹配完整命令行
+pkill -f 'sleep 10000'       # 按命令行匹配结束，无需手抄 pid
+\end{lstlisting}
+
+\subsection{任务控制 2：pidwait 函数}
+
+\begin{lstlisting}[language=bash]
+pidwait() {
+  while kill -0 "$1" 2>/dev/null; do
+    sleep 1
+  done
+}
+
+sleep 60 &
+pidwait $!   # $! 是最近一个后台任务 pid
+ls
+\end{lstlisting}
+
+\verb|wait| 只能等当前 shell 的子进程，跨会话无效；\verb|kill -0| 不发信号、只检测进程是否存在（存在返回 0），配 \verb|sleep 1| 轮询避免烧 CPU。
+
+\subsection{终端多路复用 tmux}
+
+完成 \url{https://www.hamvocke.com/blog/a-quick-and-easy-guide-to-tmux/} 教程，掌握分屏（\verb|Ctrl-b %| / \verb|Ctrl-b "|）、脱离会话（\verb|Ctrl-b d|）、重连（\verb|tmux attach|）等。
+
+\section{提交记录}
+
+课程要求将每次报告、练习、代码上传到个人 GitHub 并保留 commit 记录（禁止单次全量提交），故本报告采用分批提交：笔记 / 报告源码 / 报告 PDF / q05$\sim$q08 / 课后练习各占一次提交。
+
+\begin{itemize}
+  \item 仓库链接：\texttt{https://github.com/silksnow/sys-dev-tools-course-2026}
+  \item 提交记录截图：
+\end{itemize}
+
+% \begin{figure}[H]\centering
+%   \includegraphics[width=0.95\textwidth]{{commit截图}.png}
+%   \caption{GitHub commit 记录}
+% \end{figure}
+
+\end{document}
