@@ -15,7 +15,7 @@
 标题：Validate --name to reject blank names
 
 正文：--name 只含空白时仍输出问候并以 0 退出，调用方无法判错。
-     在 parse_args 后校验 a.name.strip()，为空则 p.error(...) 以退出码 2 结束。
+     在 parse_args 后校验 a.name.strip()，为空则 raise SystemExit(2) 以退出码 2 结束。
 
 ## 评审意见（重写）
 [Blocking] 新增校验缺少对应测试，需补空白与空串两个用例。
