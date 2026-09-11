@@ -12,7 +12,7 @@
 \usepackage[a4paper,margin=2.2cm]{geometry}
 \usepackage{graphicx}
 \usepackage{float}
-\graphicspath{{../pictures/}{../pictures/w2qs/}{../pictures/w2ex/}{../pictures/commit_pic/}}
+\graphicspath{{../pictures/}{../pictures/w2qs/}{../pictures/w2ex/}{../pictures/w2ex/2/}{../pictures/commit_pic/}}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{url}
@@ -541,6 +541,30 @@ htop
 taskset --cpu-list 0,2 stress -c 3   # 绑到核 0、2，再看 htop
 \end{lstlisting}
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-12-16}.png}
+  \caption{课后练习·性能4：\texttt{stress -c 3} 起 3 个 CPU worker，htop 中核 1/21/22 满载（约 3 核 100\%）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-13-26}.png}
+  \caption{课后练习·性能4：\texttt{taskset --cpu-list 0,2 stress -c 3 \&}，PID 38964，dispatch 3 个 cpu hog}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-14-28}.png}
+  \caption{课后练习·性能4：taskset 后 htop，3 个 stress 线程被限制在核 0、2 上轮流跑（各约 60\%$\sim$70\%，不再独占 3 个核）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-16-32}.png}
+  \caption{课后练习·性能4：\texttt{man taskset} 查看 \texttt{-c/--cpu-list} 说明（按 CPU 编号列表而非位掩码）}
+\end{figure}
+
 \verb|stress -c 3| 开 3 个 worker 线程各跑 CPU 死循环，不加限制时内核把它们调度到不同核，能占满 3 个核；\verb|taskset --cpu-list 0,2| 设置的是进程的 CPU 亲和性，把整个进程（连同 3 个线程）限制在核 0、2 上，于是 3 个线程只能挤在这 2 个核里，最多看到 2 核满载、第 3 个线程排队等——所以不是 3 个核满载。
 
 附加题：用 \verb|cgroups| 限制 \verb|stress -m| 内存。
@@ -554,11 +578,63 @@ echo $! | sudo tee /sys/fs/cgroup/limit_mem/cgroup.procs    # 把进程丢进 cg
 # 结果：被限制在 128M 内，内存不再暴涨
 \end{lstlisting}
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-25-05}.png}
+  \caption{课后练习·性能4（附加）：cgroups 建 \texttt{limit\_mem} 组、写 \texttt{memory.max=128M}，再把 stress 进程加入 \texttt{cgroup.procs}}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-26-05}.png}
+  \caption{课后练习·性能4（附加）：\texttt{stress -m 4 --vm-bytes 64M}，htop 中 4 个 worker 的内存占用被 cgroup 限制}
+\end{figure}
+
 \verb|cgroups|（control groups）是内核按进程组限 CPU/内存/IO 的机制，v2 里写 \verb|memory.max| 即设内存上限，超过会回收甚至 OOM。
 
 \subsection{性能分析 5（进阶）：Wireshark 抓 curl 报文}
 
-\verb|curl ipinfo.io| 发起请求，Wireshark 抓包，过滤器填 \verb|http| 只看 HTTP 报文。
+\verb|curl ipinfo.io| 发起 HTTP 请求并获取本机 IP 的信息，用 Wireshark 抓取 \verb|curl| 发出的请求与收到的回复报文。\verb|curl| 默认走明文 \verb|http://|，报文内容在 Wireshark 中直接可见；若走 \verb|https| 则被 TLS 加密，只能看到握手，\verb|http| 过滤器筛不出内容。
+
+\begin{lstlisting}[language=bash]
+sudo usermod -aG wireshark "$USER"   # 允许非 root 抓包（需注销重登生效）
+curl ipinfo.io                       # 明文 HTTP，返回 IP 信息 JSON
+\end{lstlisting}
+
+抓包流程：打开 Wireshark 选正在使用的网卡开始抓包 $\to$ 另开终端执行 \verb|curl ipinfo.io| $\to$ 停止抓包 $\to$ 过滤器填 \verb|http| 只看 HTTP 报文。
+
+\begin{lstlisting}
+http              # 显示过滤器：只看 HTTP 报文
+http.request      # 只看请求
+http.response     # 只看响应
+\end{lstlisting}
+
+过滤器 \verb|http| 后通常可见两条报文：\verb|GET / HTTP/1.1|（\verb|curl| 发出的请求，含 \verb|Host: ipinfo.io|、\verb|User-Agent: curl/...|）与 \verb|HTTP/1.1 200 OK|（服务器回复，\verb|Content-Type: application/json|，body 即 IP 信息 JSON）。HTTP 请求结构为请求行 + 头部 + 空行 + body，响应为状态行 + 头部 + body；TCP 三次握手属 \verb|tcp| 报文，被 \verb|http| 过滤掉属正常。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-39-17}.png}
+  \caption{课后练习·性能5：\texttt{curl ipinfo.io} 返回本机 IP 信息 JSON（IP、城市、地区、运营商等）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-40-55}.png}
+  \caption{课后练习·性能5：Wireshark 从 wlo1 网卡开始抓包，未加过滤器时混杂着 TCP/TLS/MDNS 等报文}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-42-33}.png}
+  \caption{课后练习·性能5：过滤器填 \texttt{http}，只剩两条——\texttt{GET / HTTP/1.1} 请求与 \texttt{HTTP/1.1 200 OK}（JSON）响应}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item Wireshark 是网络抓包分析工具，显示过滤器只影响"显示"、不影响"抓取"；\verb|http| 只看 HTTP 报文。
+  \item HTTP 请求 = 请求行（方法/路径/版本）+ 头部 + 空行 + body；响应 = 状态行 + 头部 + body。
+  \item 必须抓明文 \verb|http|：\verb|curl| 默认明文，报文内容可见；\verb|https| 被 TLS 加密，只能看到握手报文。
+\end{enumerate}
 
 \subsection{任务控制 1：pgrep / pkill}
 
@@ -569,6 +645,12 @@ bg
 pgrep -af sleep              # -a 显示完整命令行，-f 匹配完整命令行
 pkill -f 'sleep 10000'       # 按命令行匹配结束，无需手抄 pid
 \end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-36-38}.png}
+  \caption{课后练习·任务控制1：\texttt{sleep 10000} 经 Ctrl-Z 挂起、\texttt{bg} 后台继续，\texttt{pgrep -af} 查到 PID 47897，\texttt{pkill -f} 结束，再查已无进程}
+\end{figure}
 
 \subsection{任务控制 2：pidwait 函数}
 
@@ -584,11 +666,83 @@ pidwait $!   # $! 是最近一个后台任务 pid
 ls
 \end{lstlisting}
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-50-01}.png}
+  \caption{课后练习·任务控制2：定义 \texttt{pidwait}（\texttt{kill -0} 轮询），\texttt{sleep 60 \&} 后 \texttt{pidwait \$!}，等待结束显示 Done 再执行 \texttt{ls}}
+\end{figure}
+
 \verb|wait| 只能等当前 shell 的子进程，跨会话无效；\verb|kill -0| 不发信号、只检测进程是否存在（存在返回 0），配 \verb|sleep 1| 轮询避免烧 CPU。
 
 \subsection{终端多路复用 tmux}
 
-完成 \url{https://www.hamvocke.com/blog/a-quick-and-easy-guide-to-tmux/} 教程，掌握分屏（\verb|Ctrl-b %| / \verb|Ctrl-b "|）、脱离会话（\verb|Ctrl-b d|）、重连（\verb|tmux attach|）等。
+完成 \url{https://www.hamvocke.com/blog/a-quick-and-easy-guide-to-tmux/} 教程（自定义配置参考 \url{https://www.hamvocke.com/blog/a-guide-to-customizing-your-tmux-conf/}）。
+
+tmux（terminal multiplexer）相当于终端里的窗口管理器：一个终端窗口内开多个 window 与 pane，每个 pane 是独立 shell。三大概念由大到小为 session（会话）$>$ window（窗口）$>$ pane（分屏）。所有命令都是"前缀键 \verb|C-b|（\verb|Ctrl+b|）+ 命令键"两步。核心价值是\textbf{会话保活}：ssh 断线后 session 仍在后台运行，\verb|tmux attach| 接回原现场。
+
+\begin{lstlisting}[language=bash]
+sudo apt install tmux    # Ubuntu/WSL；macOS 用 brew install tmux
+
+tmux                     # 新建并进入会话（底部出现绿色状态栏）
+
+C-b %                    # 竖分屏（左右）
+C-b "                    # 横分屏（上下）
+C-b <方向键>             # 切换 pane
+C-b c                    # 新建 window；C-b p / C-b n 切换上/下一个
+C-b d                    # 脱离会话（后台继续运行）
+tmux ls                  # 列出所有会话
+tmux attach -t 0         # 重连 0 号会话
+tmux new -s database     # 新建名为 database 的会话
+\end{lstlisting}
+
+自定义配置写入 \verb|~/.tmux.conf|，保存后按 \verb|C-b r| 重载：
+
+\begin{lstlisting}[language=bash]
+unbind C-b                        # 换前缀 C-b -> C-a
+set-option -g prefix C-a
+bind-key C-a send-prefix
+
+bind | split-window -h            # 用 | 竖分、- 横分
+bind - split-window -v
+unbind '"'
+unbind %
+
+bind r source-file ~/.tmux.conf   # 一键重载配置
+
+bind -n M-Left  select-pane -L    # Alt+方向键直接切 pane
+bind -n M-Right select-pane -R
+bind -n M-Up    select-pane -U
+bind -n M-Down  select-pane -D
+
+set -g mouse on                   # 鼠标模式
+set-option -g allow-rename off    # 禁止自动重命名窗口
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 14-54-45}.png}
+  \caption{课后练习·tmux：\texttt{sudo tmux} 新建会话，\texttt{C-b \%} 竖分屏得到左右两个独立 shell，底部绿色状态栏显示 \texttt{[0] 0:bash*}}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 15-02-37}.png}
+  \caption{课后练习·tmux：\texttt{tmux ls} 列出两个会话（0 号 1 个 window、1 号 3 个 window 且 attached），状态栏可见 \texttt{0:bash 1:bash- 2:bash*} 多个窗口}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 15-08-36}.png}
+  \caption{课后练习·tmux：会话命名与嵌套，状态栏显示 \texttt{[database]0:tmux*}，演示 window/pane 嵌套与多会话管理}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item tmux = 终端多路复用器，\textbf{session $>$ window $>$ pane} 三层；命令均为前缀键 + 命令键。
+  \item 分屏 \verb|C-b %| / \verb|C-b "|，脱离会话 \verb|C-b d|，重连 \verb|tmux attach -t <名/号>|，列表 \verb|tmux ls|。
+  \item 会话保活是核心价值：断线后进程仍在服务器后台运行，重新 attach 即恢复现场。
+  \item 配置写在 \verb|~/.tmux.conf|，可改前缀、分屏键、鼠标模式、状态栏样式等，\verb|source-file| 即时重载。
+\end{enumerate}
 
 \section{提交记录}
 
