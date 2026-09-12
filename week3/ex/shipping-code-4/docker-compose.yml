@@ -1,0 +1,17 @@
+# docker-compose.yml
+services:
+  web:
+    build: .                          # 用当前目录 Dockerfile 构建
+    ports:
+      - "5000:5000"
+    environment:
+      - REDIS_HOST=cache              # 服务名就是内网 DNS 主机名
+    depends_on:
+      - cache
+  cache:
+    image: redis:7-alpine             # 直接拉官方 Redis 镜像
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
