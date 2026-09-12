@@ -16,6 +16,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+dist/
 
 # Node 依赖
 node_modules/
