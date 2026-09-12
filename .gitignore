@@ -8,3 +8,17 @@
 *.toc
 *.bbl
 *.blg
+
+# Python 构建/缓存
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node 依赖
+node_modules/
+
+# C/C++ 构建
+build/
