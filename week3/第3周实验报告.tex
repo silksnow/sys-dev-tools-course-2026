@@ -1,0 +1,672 @@
+% !TEX program = xelatex
+% ============================================================
+%  第3周实验报告（Packaging and Shipping Code / 智能体编程 / 不止于代码 / Python 与 PyTorch）
+%  命令行编译：latexmk -xelatex 第3周实验报告.tex
+% ============================================================
+\documentclass[a4paper,11pt]{article}
+
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\graphicspath{{../pictures/}{../pictures/w3/}{../pictures/commit_pic/}}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  urlcolor=blue,
+  linkcolor=blue,
+  citecolor=blue,
+  bookmarksnumbered=true
+}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=flexible,
+  commentstyle=\color{gray},
+  keywordstyle=\color{blue},
+  stringstyle=\color{teal},
+  showstringspaces=false,
+  tabsize=4
+}
+
+\title{第3周实验报告（Packaging and Shipping Code / 智能体编程 / 不止于代码 / Python 与 PyTorch）}
+\author{唐朝伟—学号：25020007111}
+\date{2026年9月7日}
+
+\begin{document}
+\maketitle
+
+\section{第9题 从源码构建并在干净环境安装 Wheel}
+
+\textbf{主题}：Packaging and Shipping Code
+
+按 src layout 建最小命令行包：\verb|__init__.py| 标记包，\verb|cli.py| 用 argparse 解析 \verb|--name|，\verb|pyproject.toml| 声明构建后端与入口点 \verb|sdt-greet|。
+
+\begin{lstlisting}[language=Python]
+# src/greetlab/cli.py
+import argparse
+
+def main():
+    p = argparse.ArgumentParser()            # 解析器
+    p.add_argument("--name", required=True)  # 必填 --name
+    a = p.parse_args()                       # 解析 argv
+    print(f"Hello, {a.name}!")               # 插值输出
+\end{lstlisting}
+
+\begin{lstlisting}
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "greetlab-25020007111"
+version = "0.1.0"
+
+[project.scripts]
+sdt-greet = "greetlab.cli:main"
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+mkdir q09 && cd q09
+mkdir -p src/greetlab
+pip install build
+python -m build            # 产出 dist/greetlab_25020007111-0.1.0-py3-none-any.whl
+
+python -m venv .venv       # 干净虚拟环境
+source .venv/bin/activate
+pip install dist/greetlab_25020007111-0.1.0-py3-none-any.whl
+
+cd ..                      # 切到 q09 之外，证明入口点已全局安装
+sdt-greet --name 25020007111    # Hello, 25020007111!
+which sdt-greet                 # 指向 .venv/bin/sdt-greet
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-07-13}.png}
+  \caption{第9题：\texttt{python -m build} 构建成功，\texttt{dist/} 下生成 \texttt{.whl} 与 \texttt{.tar.gz}，\texttt{ls -R} 可见 src 布局}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-09-18}.png}
+  \caption{第9题：新建 venv、\texttt{which python} 指向 venv，从 wheel 安装后切到 q09 之外运行 \texttt{sdt-greet --name 25020007111} 输出 Hello}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item src layout 把源码放进 \verb|src/|，配合 \verb|__init__.py| 标记包，避免误 import 未构建的半成品。
+  \item \verb|pyproject.toml| 是现代打包的单一事实来源：\verb|[build-system]| 指定 setuptools 后端，\verb|[project.scripts]| 生成命令行入口点。
+  \item \verb|python -m build| 是 PEP 517 构建前端，产出纯 Python wheel（\verb|py3-none-any|）与 sdist。
+  \item 关键验证：在 q09 \emph{之外} 运行 \verb|sdt-greet|，才真正证明 wheel 装好、入口点生效，而非凑巧读到本地源码。
+\end{enumerate}
+
+\section{第10题 让编程智能体进入可验证的修复循环}
+
+\textbf{主题}：智能体编程
+
+复制 q09 为 q10，先写一个\emph{会失败}的测试（TDD）：\verb|--name| 只含空白时应以退出码 2 结束。再让智能体修改实现并运行测试，最后人工 \verb|git diff| 审改动、复跑测试。
+
+\begin{lstlisting}[language=Python]
+# test_cli.py
+import sys
+import pytest
+from greetlab.cli import main
+
+def test_blank_name_exits_2():
+    with pytest.raises(SystemExit) as excinfo:
+        sys.argv = ["sdt-greet", "--name", "   "]   # 空白 name
+        main()
+    assert excinfo.value.code == 2
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+cp -r q09 q10 && cd q10
+PYTHONPATH=src pytest      # 先确认失败：DID NOT RAISE SystemExit
+\end{lstlisting}
+
+给智能体的提示（目标 + 约束 + 验证命令）：
+
+\begin{lstlisting}
+目标：修改 q10/src/greetlab/cli.py 的 main，使 --name 只含空白时以 SystemExit(2) 结束。
+约束：不要改动 test_cli.py 和 pyproject.toml；不要删除 --name 参数。
+验证命令：cd q10 && PYTHONPATH=src pytest
+请修改实现并运行测试，直到通过。
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python]
+# src/greetlab/cli.py（修复后）
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--name", required=True)
+    a = p.parse_args()
+    if not a.name.strip():          # 只含空白判为非法
+        raise SystemExit(2)
+    print(f"Hello, {a.name}!")
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+git diff                   # 人工检查：确认只改了 cli.py
+git checkout -- <无关文件>  # 撤销智能体的无关修改
+PYTHONPATH=src pytest      # 1 passed
+\end{lstlisting}
+
+智能体会话记录（share）：\url{https://opncd.ai/share/45fy5UJ0}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-31-41}.png}
+  \caption{第10题：VS Code 中新建 \texttt{test\_cli.py}，\texttt{sys.argv = ["sdt-greet","--name","   "]}，断言退出码为 2}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-32-06}.png}
+  \caption{第10题：先跑测试确认失败——\texttt{DID NOT RAISE SystemExit}，捕获输出为 \texttt{Hello,   !}}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-39-13}.png}
+  \caption{第10题：智能体按目标修改 \texttt{cli.py}，新增 \texttt{if not a.name.strip(): raise SystemExit(2)}，并运行测试通过}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 20-43-17}.png}
+  \caption{第10题：修复后 \texttt{pytest} 显示 1 passed}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item TDD：先写失败的测试描述正确行为，再改实现让它通过，目标明确、可自动验证。
+  \item 给智能体三点：目标（改什么行为）、约束（不许动什么）、验证命令（怎么算对）——形成可验证修复循环。
+  \item \verb|argparse| 对参数错误约定退出码 2；\verb|p.error(...)| 会打印 usage 再退出 2，比裸 \verb|sys.exit(2)| 更友好。
+  \item 人必须把关：\verb|git diff| 审改动、撤销无关修改、复跑测试；智能体可能“过拟合”测试。
+\end{enumerate}
+
+\section{第11题 把“无法处理”的协作材料改成可执行信息}
+
+\textbf{主题}：不止于代码
+
+围绕“空姓名仍输出问候语”缺陷，把三段质量差的协作材料改写为可执行信息：Issue 补环境/复现/期望/实际，提交信息用祈使语气标题加“为什么+怎么做”，评审意见给具体行为+风险+建议并标注 Blocking/Suggestion/Nit。
+
+\begin{lstlisting}
+# communication.md
+
+## Issue（重写）
+标题：sdt-greet 对空白 --name 仍输出问候并以 0 退出
+环境：Linux / Python 3.13（Windows 是否可复现待确认）
+复现：sdt-greet --name " "
+期望结果：以非零退出码结束，不输出问候语。
+实际结果：输出 "Hello,  !" 并以退出码 0 结束。
+
+## 提交信息（重写）
+标题：Validate --name to reject blank names
+正文：--name 只含空白时仍输出问候并以 0 退出，调用方无法判错。
+     在 parse_args 后校验 a.name.strip()，为空则 raise SystemExit(2)。
+
+## 评审意见（重写）
+[Blocking] 新增校验缺少对应测试，需补空白与空串两个用例。
+[Nit] 错误消息建议统一格式，便于断言。
+[Suggestion] 可复用 argparse type 校验，逻辑更内聚。
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 21-05-25}.png}
+  \caption{第11题：VS Code 编辑 \texttt{communication.md}（左）与预览（右），Issue/提交信息/评审意见三段均按可执行标准重写}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item 好的 Issue：标题一句话说清问题，正文含环境、复现命令、期望 vs 实际，未知写“待确认”。
+  \item 好的提交信息：祈使语气标题即摘要，正文分“问题 + 解决方案”。
+  \item 好的评审意见：指出具体行为 + 风险 + 建议动作，并区分 Blocking / Suggestion / Nit。
+  \item 共同原则：可执行、专业、简洁、不含情绪，全文控制在 400 字以内。
+\end{enumerate}
+
+\section{第12题 修复一个可复现的线性回归训练循环}
+
+\textbf{主题}：Python 与 PyTorch
+
+补全训练循环：\verb|zero_grad| → \verb|backward| → \verb|step|；训练后 \verb|model.eval()| 并在 \verb|torch.no_grad()| 中计算最终损失，打印 loss/weight/bias。不得直接赋值 weight/bias。
+
+\begin{lstlisting}[language=Python]
+# q12/train.py
+import torch
+from torch import nn
+
+torch.manual_seed(20260907)
+x = torch.linspace(-1, 1, 101).reshape(-1, 1)
+y = 3 * x - 1
+
+model = nn.Linear(1, 1)
+loss_fn = nn.MSELoss()
+opt = torch.optim.SGD(model.parameters(), lr=0.1)
+
+for _ in range(200):
+    pred = model(x)
+    loss = loss_fn(pred, y)
+    opt.zero_grad()        # TODO1：清空梯度（不清会累加）
+    loss.backward()        # TODO2：反向传播求梯度
+    opt.step()             # TODO3：按梯度更新参数
+
+model.eval()               # 评估模式
+with torch.no_grad():      # 不计算梯度
+    pred = model(x)
+    final_loss = loss_fn(pred, y)
+print(f"final loss = {final_loss.item():.6f}")
+print(f"weight = {model.weight.item():.6f}")
+print(f"bias   = {model.bias.item():.6f}")
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+python q12/train.py
+# final loss = 0.000000   (< 0.001，收敛)
+# weight = 2.999997       (~= 3)
+# bias   = -1.000000      (~= -1)
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 21-35-05}.png}
+  \caption{第12题：补全 \texttt{train.py}，训练三步与评估阶段注释齐全}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 21-37-12}.png}
+  \caption{第12题：运行输出 final loss = 0.000000、weight = 2.999997、bias = -1.000000，训练收敛}
+\end{figure}
+
+\subsection*{解题感悟}
+\begin{enumerate}
+  \item PyTorch 训练三步：\verb|opt.zero_grad()| 清梯度（梯度默认累加）、\verb|loss.backward()| 反向传播、\verb|opt.step()| 更新参数，顺序不能乱。
+  \item 评估用 \verb|model.eval()| + \verb|torch.no_grad()|，关闭训练专用行为并省内存。
+  \item 数据由 $y=3x-1$ 生成，故收敛后 weight $\approx 3$、bias $\approx -1$；必须靠训练学出来，不能直接赋值。
+  \item \verb|torch.manual_seed(20260907)| 固定随机种子，保证结果可复现。
+\end{enumerate}
+
+\section{课后练习（missing-semester：shipping-code / agentic-coding / beyond-code）}
+
+\subsection{A1. printenv 保存环境 → 建 venv → diff 前后差异}
+
+\begin{lstlisting}[language=bash]
+printenv > before.txt          # 环境快照
+python -m venv .venv
+source .venv/bin/activate
+printenv > after.txt
+diff before.txt after.txt      # 新增 VIRTUAL_ENV、PS1，PATH 开头插入 .venv/bin
+
+which deactivate               # 无输出（不是可执行文件）
+type deactivate                # deactivate 是一个 bash 函数
+\end{lstlisting}
+
+激活后 \verb|PATH| 开头被插入 \verb|.venv/bin|，命令查找按 \verb|PATH| 从前往后，故 \verb|python|/\verb|pip| 优先命中 venv；\verb|deactivate| 是 \verb|activate| 脚本定义的函数，负责还原 \verb|PATH|、\verb|VIRTUAL_ENV|。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 21-53-30}.png}
+  \caption{课后练习·A1：\texttt{printenv} 前后快照与 \texttt{diff}，可见 \texttt{VIRTUAL\_ENV}、\texttt{PS1} 与 \texttt{PATH} 变化}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 21-54-44}.png}
+  \caption{课后练习·A1：\texttt{which deactivate} 显示其为函数，\texttt{deactivate} 后 \texttt{PATH} 还原}
+\end{figure}
+
+\subsection{A2. 建包 + 生成并检查 lockfile}
+
+\begin{lstlisting}[language=bash]
+cp -r ../q09 shipping-code-2 && cd shipping-code-2
+rm -rf .venv                   # 复制时别带 venv（不可移植）
+# 给 pyproject.toml 补 requires-python = ">=3.13"、dependencies = ["requests>=2.31"]
+pip install uv
+uv sync                        # 建/复用 .venv 并真正安装
+uv tree                        # 依赖树
+head -40 uv.lock               # 每个包有 name/version/hash
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 22-01-11}.png}
+  \caption{课后练习·A2：初次 \texttt{cp -r ../q09} + \texttt{uv lock}，\texttt{head -20 uv.lock} 查看锁文件（此时仅有项目自身一条）}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 22-14-37}.png}
+  \caption{课后练习·A2：\texttt{uv lock}/\texttt{uv sync} 解析依赖并创建 venv，\texttt{uv tree} 与 \texttt{uv.lock} 检查}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 22-22-07}.png}
+  \caption{课后练习·A2：先 \texttt{rm -rf .venv} 再 \texttt{uv sync}，\texttt{head -20 uv.lock} 查看锁定内容}
+\end{figure}
+
+\verb|uv lock| 只解析、不安装；要真正安装用 \verb|uv sync|。lockfile 把每层依赖的精确版本与哈希写死，保证可复现。
+
+\subsection{A3. 装 Docker，用 docker compose 本地构建 Missing Semester 网站}
+
+\begin{lstlisting}[language=bash]
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+
+git clone https://github.com/missing-semester/missing-semester.git
+cd missing-semester
+docker compose up              # 构建 Jekyll 站点并起服务，http://localhost:4000
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 22-38-29}.png}
+  \caption{课后练习·A3：\texttt{docker compose version} 确认 5.5.0，启动 docker 并 clone missing-semester 仓库}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 23-18-18}.png}
+  \caption{课后练习·A3：首次 \texttt{docker compose up} 构建 Ruby 镜像成功，但容器报 \texttt{Could not locate Gemfile} 反复重启}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 12-19-47}.png}
+  \caption{课后练习·A3：查看 \texttt{docker-compose.yml}，\texttt{down} 后重新 \texttt{up}，容器正常启动并监听 4000}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 12-20-21}.png}
+  \caption{课后练习·A3：浏览器打开 \texttt{http://localhost:4000} 显示 Missing Semester 首页}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 12-20-51}.png}
+  \caption{课后练习·A3：站内页面 \texttt{/2026/course-shell/} 正常渲染}
+\end{figure}
+
+\subsection{A4. 写 Dockerfile + docker-compose.yml（应用 + Redis 缓存）}
+
+\begin{lstlisting}[language=Python]
+# app.py（Flask + Redis 访问计数）
+import os
+from flask import Flask
+import redis
+app = Flask(__name__)
+r = redis.Redis(host=os.environ.get("REDIS_HOST", "localhost"),
+                port=6379, decode_responses=True)
+@app.route("/")
+def home():
+    return f"访问次数: {r.incr('hits')}"
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+\end{lstlisting}
+
+\begin{lstlisting}
+# Dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+CMD ["python", "app.py"]
+\end{lstlisting}
+
+\begin{lstlisting}
+# docker-compose.yml
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - REDIS_HOST=cache      # 服务名即内网 DNS
+    depends_on:
+      - cache
+  cache:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+volumes:
+  redis_data:
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 13-08-32}.png}
+  \caption{课后练习·A4：四个文件（Dockerfile / app.py / requirements.txt / docker-compose.yml）与 \texttt{docker compose up --build} 运行}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 13-09-45}.png}
+  \caption{课后练习·A4：浏览器访问 \texttt{localhost:5000} 显示“访问次数: 6”，Redis 计数生效}
+\end{figure}
+
+\subsection{A5. 发布到 TestPyPI + 打 Docker 镜像推到 ghcr.io}
+
+\begin{lstlisting}[language=bash]
+python -m build                # 产出 wheel
+# 方式 A：twine upload -r testpypi dist/*（需 TestPyPI 账号 2FA + token）
+# 方式 B（TestPyPI 受阻时的等效做法）：Docker 镜像装本地 wheel
+docker build -t ghcr.io/silksnow136/greetlab:v0.1.0 .
+echo "ghp_xxx" | docker login ghcr.io -u silksnow136 --password-stdin
+docker push ghcr.io/silksnow136/greetlab:v0.1.0
+docker run --rm ghcr.io/silksnow136/greetlab:v0.1.0 --name 25020007111
+\end{lstlisting}
+
+本地 wheel 版 Dockerfile：
+
+\begin{lstlisting}
+FROM python:3.12-slim
+COPY greetlab_25020007111-0.1.0-py3-none-any.whl .
+RUN pip install --no-cache-dir ./greetlab_25020007111-0.1.0-py3-none-any.whl
+ENTRYPOINT ["sdt-greet"]
+CMD ["--help"]
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 14-13-04}.png}
+  \caption{课后练习·A5：Dockerfile（本地 wheel 版）；\texttt{docker login} 成功后 push 到 ghcr.io，并 \texttt{docker run ... --name 25020007111} 输出 Hello}
+\end{figure}
+
+\subsection{B1. 用智能体浏览陌生代码库（理解 opencode 的安全机制）}
+
+让智能体浏览 opencode 仓库，解释权限请求拦截、权限模式配置与沙箱机制，并要求给出源码文件路径与行号。
+
+\begin{lstlisting}
+请浏览当前仓库（opencode），解释它的安全 / 权限机制是怎么实现的：
+1. 用户确认工具调用（权限请求）是在哪一步、怎么拦截的？
+2. 有哪些权限模式（只读、自动批准等）？分别在哪个文件配置？
+3. 沙箱 / 隔离是怎么做的？是否依赖容器或系统机制？
+请给出关键源码文件路径和行号，不要贴大段代码。
+\end{lstlisting}
+
+智能体会话记录（share）：\url{https://opncd.ai/share/FJj9fIkV}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 14-28-44}.png}
+  \caption{课后练习·B1：智能体在 opencode 仓库中反复 \texttt{grep} 权限相关源码定位实现}
+\end{figure}
+
+\subsection{B2. 从零氛围编程一个小应用（不手写一行代码）}
+
+给智能体一个 C++ 目标，让它自行用 CMake 组织项目、写代码、编译、运行、迭代。
+
+\begin{lstlisting}
+用 C++ 写一个命令行小工具 csv2md：读取 CSV 文件，输出 Markdown 表格。
+要求：用 CMake 组织项目生成单个可执行文件 csv2md；正确处理引号包裹、含逗号的字段；
+自己写样例 CSV，用 g++/cmake 编译并运行验证输出；自己迭代直到能跑通。
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+cmake -S . -B build && cmake --build build
+./build/csv2md sample.csv
+\end{lstlisting}
+
+智能体会话记录（share）：\url{https://opncd.ai/share/b4J42S5E}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 14-29-03}.png}
+  \caption{课后练习·B2：智能体自动写 CMakeLists.txt / main.cpp / sample.csv，构建并运行，还自行改代码迭代}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 14-32-02}.png}
+  \caption{课后练习·B2：\texttt{csv2md} 正确处理引号、逗号、竖线等边界，输出 Markdown 表格}
+\end{figure}
+
+\subsection{B3. AGENTS.md / Skill / 子智能体（何时用哪个）}
+
+在 \verb|week3/ex/agentic-coding-3/q09| 下建 \verb|AGENTS.md|、Skill（\verb|.opencode/skills/python-code-check/SKILL.md|）与子智能体（\verb|.opencode/agent/code-reviewer.md|），重启 opencode 后分别触发验证。
+
+\begin{lstlisting}
+# AGENTS.md（项目根，永远加载）
+# greetlab 项目约定
+- 改完代码必须运行 `PYTHONPATH=src pytest` 并通过。
+- 提交前运行 `ruff check .`，不得留下未使用 import。
+- 不要修改 `pyproject.toml` 的 name/version。
+- 行为约定：`--name` 只含空白字符时必须以退出码 2 结束。
+\end{lstlisting}
+
+\begin{lstlisting}
+# .opencode/skills/python-code-check/SKILL.md
+---
+name: python-code-check
+description: Use when checking changed Python files in greetlab. 对改动过的 .py 跑 ruff 与 pytest，给出问题清单。
+---
+1. git diff --name-only 找出改动的 .py 文件；
+2. 对每个文件跑 ruff check；
+3. 跑 PYTHONPATH=src pytest；
+4. 汇总问题（文件:行号 + 建议），不改文件。
+\end{lstlisting}
+
+\begin{lstlisting}
+# .opencode/agent/code-reviewer.md
+---
+description: 审查 greetlab 未提交改动，输出分级评审，不改文件。
+mode: subagent
+permission:
+  edit: deny
+---
+审查未提交改动，重点看：空白 name 是否真的以退出码 2 结束、是否误改了 test/pyproject。
+按 Blocking / Suggestion / Nit 三级输出中文评审意见。
+\end{lstlisting}
+
+三种手段的区别：AGENTS.md 启动时全量常驻；Skill 只注入 name+description、按需加载正文；子智能体独立上下文、由主智能体通过 task 调用。改完须重启 opencode。
+
+智能体会话记录（share）：\url{https://opncd.ai/share/5H0MEJI3}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 15-34-30}.png}
+  \caption{课后练习·B3：触发 Skill 得到改动文件清单（I001/F401）与 pytest 结果；再让 \texttt{code-reviewer} 子智能体审查，输出 Blocking 级意见}
+\end{figure}
+
+\subsection{B4. 用智能体完成 Markdown 无序列表正则替换（不直接编辑文件）}
+
+目标：把 \verb|code-quality.md| 里行首的 \verb|- | 列表标记替换成 \verb|* |，但保留日期/范围/选项里的 \verb|-|。约束智能体不得直接编辑文件，改用 sed。
+
+\begin{lstlisting}
+把 code-quality.md 里行首的无序列表标记 `- ` 替换为 `* `。
+约束：不要直接编辑文件；用命令行工具（sed）加正则完成；
+日期(2026-01-14)、范围(a-f)、选项(-q) 等其它位置的 `-` 必须保留。
+完成后给出你用的 sed 命令，并贴 git diff 让我复核。
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+sed -i 's/^- /* /' code-quality-after.md   # ^ 锚定行首，只改列表标记
+git diff --no-index --stat code-quality.md code-quality-after.md
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-12 18-33-17}.png}
+  \caption{课后练习·B4：智能体先复制文件再用 \texttt{sed -i 's/\textasciicircum{}- /* /'} 替换行首列表标记（共 28 处），未直接编辑，日期/范围/选项中的 \texttt{-} 保留}
+\end{figure}
+
+智能体会话记录（share）：\url{https://opncd.ai/share/ySJqhzoD}
+
+\subsection{C1. 浏览知名项目源码，找出几类“值得写”的注释}
+
+选 C++ 项目 \verb|nlohmann/json| 与 \verb|fmt|，用 \verb|rg| 定位注释类型。实测结果：
+
+\begin{lstlisting}[language=bash]
+git clone https://github.com/nlohmann/json.git && cd json
+rg -n "TODO|FIXME|HACK" include/ src/          # 带上下文的待办
+rg -n "https://|RFC|paper|wg21" include/       # 外部引用
+rg -n -i "we use .* instead|deliberately|do not use" include/   # why-not
+\end{lstlisting}
+
+\begin{itemize}
+  \item 外部引用：\verb|json.hpp:25| 挂 issue、\verb|json.hpp:5026| 引 RFC 6902、\verb|lexer.hpp:335| 对应 RFC 8259、\verb|to_chars.hpp:345| 锚定 Dragonbox 论文。
+  \item why-not / 血泪教训：\verb|json.hpp:5459| 的 \verb|// do not remove the space after '<'| 是编译器 workaround；\verb|fmt/core.h:651| 的 \verb|intentionally not constexpr| 是刻意设计。
+  \item TODO：\verb|json.hpp:1268| 是配合 cppcheck 的 \verb|// cppcheck-suppress ... TODO check|；fmt 源码里 \verb|rg TODO| 竟零命中。
+\end{itemize}
+
+心得：注释价值排序为 why-not $>$ 外部引用 $>$ 带上下文 TODO $>$ 空 TODO。删掉会让人踩坑的，才叫“值得写”的注释。
+
+\subsection{C2. 好提交信息 vs 弱提交信息（体会补背景的费劲）}
+
+用 \verb|git log --oneline -20| 对比 \verb|fmt| 与 \verb|json|：
+
+\begin{itemize}
+  \item 好提交：\verb|json| \verb|ff80ed329| “Speed up dump(), and keep it from overflowing the stack” 正文讲清问题、方案、基准（4.2x/2.7x）与影响。
+  \item 弱提交：\verb|fmt| \verb|14174c82| “Add braces for readability”、\verb|json| \verb|3e2de3222| “Remove unused iomanip include”，正文为空。
+\end{itemize}
+
+按“问题 → 解决方案 → 影响”重写弱提交，例如 \verb|fix crash| 可改为 \verb|Fix use-after-free in parse when input is empty|，正文说明空输入导致 UAF、提前校验 \verb|input.empty()|、代价可忽略。
+
+心得：弱提交把反推成本转嫁给了未来——好提交当下多花 30 秒，弱提交让未来每个读它的人多花几分钟 \verb|git show| 翻代码猜动机。
+
+\subsection{C3. 评估一个未解决的 issue}
+
+用 GitHub REST API 取 \verb|nlohmann/json| 的 \verb|good first issue|：
+
+\begin{lstlisting}[language=bash]
+curl -sS "https://api.github.com/repos/nlohmann/json/issues?labels=good%20first%20issue&state=open&per_page=10" \
+  | jq -r '.[] | "#\(.number)  \(.title)"'
+\end{lstlisting}
+
+\begin{itemize}
+  \item \verb|#5318|（极高）：贴最小复现 + 定位到 \verb|binary_writer.hpp:403-407| + 环境 \verb|g++ 13.3.0/Ubuntu 24.04| + 分配次数表 + 建议修法，维护者可直接开工。
+  \item \verb|#5317|（极高）：引 RFC 8949 §3.2.3、给接受/拒绝对照表与复现，标准到可当模板。
+  \item \verb|#3885|（低）：\verb|Minimal code example: Na|、期望含糊，维护者被逼追问 3+ 轮才定位。
+\end{itemize}
+
+心得：issue 质量直接决定维护者时间花在哪——好 issue 让维护者直接改代码，坏 issue 让维护者先当侦探。落点是一句话：维护者看完能不能立刻开工？
+
+\section{提交记录}
+
+课程要求将每次报告、练习、代码上传到个人 GitHub 并保留 commit 记录（禁止单次全量提交）。本报告采用分批提交：笔记 / 报告源码 / 报告 PDF / q09$\sim$q12 / 课后练习各占若干次提交。
+
+\begin{itemize}
+  \item 仓库链接：\texttt{https://github.com/silksnow/sys-dev-tools-course-2026}
+  \item 提交记录截图：
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{{Screenshot From 2026-09-11 16-09-13}.png}
+  \caption{GitHub commit 记录（含第3周笔记、第1/2周报告与笔记更新等分批提交）}
+\end{figure}
+
+\end{document}
